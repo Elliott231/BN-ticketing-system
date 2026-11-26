@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  FAN
+  ADMIN
+}
+
+enum TicketStatus {
+  AVAILABLE
+  HELD
+  SOLD
+  USED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+}
+
+enum RefundStatus {
+  PENDING_RESALE
+  REFUNDABLE
+  REFUNDED
+}
+
+enum FraudKind {
+  RATE_LIMIT
+  IP_BLOCKED
+  INVALID_QR
+  REPLAYED_QR
+  ID_MISMATCH
+}
+
+model User {
+  id          String   @id @default(cuid())
+  clerkId     String   @unique
+  email       String   @unique
+  fullName    String
+  phoneNumber String?
+  isVerified  Boolean  @default(false)
+  role        Role     @default(FAN)
+  createdAt   DateTime @default(now())
+
+  ownedTickets Ticket[]       @relation("TicketOwner")
+  heldTickets  Ticket[]       @relation("TicketHolder")
+  orders       Order[]
+  returns      TicketReturn[]
+}
+
+model Stadium {
+  id       String    @id @default(cuid())
+  name     String
+  city     String
+  sections Section[]
+  seats    Seat[]
+  matches  Match[]
+}
+
+model Section {
+  id        String  @id @default(cuid())
+  stadiumId String
+  name      String
+  stadium   Stadium @relation(fields: [stadiumId], references: [id], onDelete: Cascade)
+  seats     Seat[]
+
+  @@unique([stadiumId, name])
+}
+
+model Seat {
+  id        String   @id @default(cuid())
+  stadiumId String
+  sectionId String
+  row       String
+  number    Int
+  stadium   Stadium  @relation(fields: [stadiumId], references: [id], onDelete: Cascade)
+  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  tickets   Ticket[]
+
+  @@unique([sectionId, row, number])
+  @@index([stadiumId])
+}
+
+model Match {
+  id         String   @id @default(cuid())
+  homeTeam   String
+  awayTeam   String
+  kickoff    DateTime
+  stadiumId  String
+  highDemand Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  stadium    Stadium  @relation(fields: [stadiumId], references: [id])
+  tickets    Ticket[]
+
+  @@index([kickoff])
+}
+
+model Ticket {
+  id               String       @id @default(cuid())
+  matchId          String
+  seatId           String
+  priceCents       Int
+  status           TicketStatus @default(AVAILABLE)
+
+  heldById         String?
+  heldUntil        DateTime?
+
+  ownerId          String?
+  leadBookerName   String?
+  orderId          String?
+  qrSeed           String
+  isOfficialResale Boolean      @default(false)
+  resaleCount      Int          @default(0)
+  checkedInAt      DateTime?
+
+  match   Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  seat    Seat    @relation(fields: [seatId], references: [id])
+  owner   User?   @relation("TicketOwner", fields: [ownerId], references: [id])
+  holder  User?   @relation("TicketHolder", fields: [heldById], references: [id])
+  order   Order?  @relation(fields: [orderId], references: [id])
+  returns TicketReturn[]
+
+  @@unique([matchId, seatId])
+  @@index([matchId, status])
+  @@index([ownerId])
+  @@index([heldById])
+  @@index([orderId])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  userId          String
+  status          OrderStatus @default(PENDING)
+  totalCents      Int
+  paymentRef      String?
+  stripeSessionId String?     @unique
+  expiresAt       DateTime
+  paidAt          DateTime?
+  createdAt       DateTime    @default(now())
+
+  user    User     @relation(fields: [userId], references: [id])
+  tickets Ticket[]
+
+  @@index([userId])
+  @@index([status, expiresAt])
+}
+
+model TicketReturn {
+  id           String       @id @default(cuid())
+  ticketId     String
+  userId       String
+  amountCents  Int
+  refundStatus RefundStatus @default(PENDING_RESALE)
+  createdAt    DateTime     @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId, refundStatus])
+}
+
+model FraudEvent {
+  id        String    @id @default(cuid())
+  kind      FraudKind
+  ip        String?
+  userId    String?
+  ticketId  String?
+  detail    String?
+  createdAt DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([ip])
+}
